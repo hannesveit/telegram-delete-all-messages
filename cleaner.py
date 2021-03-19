@@ -8,15 +8,9 @@ from pyrogram.raw.types.messages import ChannelMessages
 from pyrogram.errors import FloodWait, UnknownError
 
 
-API_ID = getenv('API_ID', None) or int(input('Enter your Telegram API id: '))
-API_HASH = getenv('API_HASH', None) or input('Enter your Telegram API hash: ')
-
-app = Client("client", api_id=API_ID, api_hash=API_HASH)
-app.start()
-
-
 class Cleaner:
-    def __init__(self, chats=None, search_chunk_size=100, delete_chunk_size=100):
+    def __init__(self, app, chats=None, search_chunk_size=100, delete_chunk_size=100):
+        self.app = app
         self.chats = chats or []
         if search_chunk_size > 100:
             # https://github.com/gurland/telegram-delete-all-messages/issues/31
@@ -35,14 +29,13 @@ class Cleaner:
         for i in range(0, len(l), n):
             yield l[i:i + n]
 
-    @staticmethod
-    def get_all_chats():
-        dialogs = app.get_dialogs(pinned_only=True)
+    def get_all_chats(self):
+        dialogs = self.app.get_dialogs(pinned_only=True)
 
-        dialog_chunk = app.get_dialogs()
+        dialog_chunk = self.app.get_dialogs()
         while len(dialog_chunk) > 0:
             dialogs.extend(dialog_chunk)
-            dialog_chunk = app.get_dialogs(offset_date=dialogs[-1].top_message.date)
+            dialog_chunk = self.app.get_dialogs(offset_date=dialogs[-1].top_message.date)
 
         return [d.chat for d in dialogs]
 
@@ -79,7 +72,7 @@ class Cleaner:
 
     def run(self):
         for chat in self.chats:
-            peer = app.resolve_peer(chat.id)
+            peer = self.app.resolve_peer(chat.id)
             message_ids = []
             add_offset = 0
 
@@ -99,13 +92,13 @@ class Cleaner:
         print(message_ids)
         for chunk in self.chunks(message_ids, self.delete_chunk_size):
             try:
-                app.delete_messages(chat_id=chat_id, message_ids=chunk)
+                self.app.delete_messages(chat_id=chat_id, message_ids=chunk)
             except FloodWait as flood_exception:
                 sleep(flood_exception.x)
 
     def search_messages(self, peer, add_offset):
         print(f'Searching messages. OFFSET: {add_offset}')
-        return app.send(
+        return self.app.send(
             Search(
                 peer=peer,
                 q='',
@@ -124,9 +117,18 @@ class Cleaner:
         )
 
 
+def start_app(name='client', **kwargs):
+    kwargs['api_id'] = int(getenv('API_ID', None) or input('Enter your Telegram API id: '))
+    kwargs['api_hash'] = getenv('API_HASH', None) or input('Enter your Telegram API hash: ')
+    app = Client(name, **kwargs)
+    app.start()
+    return app
+
+
 if __name__ == '__main__':
     try:
-        deleter = Cleaner()
+        app = start_app()
+        deleter = Cleaner(app)
         deleter.select_groups()
         deleter.run()
     except UnknownError as e:
